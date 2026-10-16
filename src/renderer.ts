@@ -551,18 +551,47 @@ export async function createDocumentSnapshotFromText(documentJson: string): Prom
 }
 
 /** Locate the exact OpenPencil renderer, preferring an explicit override. */
-export function findOpenPencilBinary(): string | undefined {
-  const override = pluginEnv('OPENPENCIL_BINARY')?.trim()
-    || pluginEnv('OPENPENCIL_DESKTOP')?.trim()
-  const candidates = [
-    ...(override === undefined || override.length === 0 ? [] : [expandUserHome(override)]),
-    '/Applications/OpenPencil.app/Contents/MacOS/openpencil-desktop',
-    join(homedir(), 'Applications', 'OpenPencil.app', 'Contents', 'MacOS', 'openpencil-desktop'),
-  ]
-  const pathEnv = process.env.PATH ?? ''
-  for (const dir of pathEnv.split(delimiter)) {
-    if (dir.length > 0) candidates.push(join(dir, 'openpencil-desktop'))
-  }
+/** What Windows resolves by default when `PATHEXT` is unset. */
+const WINDOWS_PATHEXT_DEFAULT = '.COM;.EXE;.BAT;.CMD'
+
+/**
+ * Windows extensions this plugin can start with `spawn` directly, in order.
+ *
+ * `spawn` is called without `shell: true`, and Node refuses to run a `.cmd`/`.bat`
+ * that way (CVE-2024-27980), so `.BAT`/`.CMD` are deliberately NOT candidates: a shim
+ * ahead of a working `.exe` on PATH would otherwise turn "binary not found, fall back
+ * to the Jian preview" into `EINVAL` thrown out of the tool.
+ */
+const WINDOWS_SPAWNABLE_SUFFIXES = ['.com', '.exe']
+
+/**
+ * Executable spellings to try for a bare program name on this platform.
+ *
+ * Windows resolves a bare name through `PATHEXT`, so probing only
+ * `openpencil-desktop` can never match the shipped `openpencil-desktop.exe`: the exact
+ * renderer looked missing, the render fell through to Jian, and Jian was equally
+ * unfindable in the same way — the whole tool failed with `spawn jian ENOENT`
+ * (issue #9). POSIX has no suffixes, so the bare name is the whole list there.
+ *
+ * An empty or whitespace-only `PATHEXT` (sanitised environments, some service
+ * launchers) is treated as unset rather than as "no extensions at all", which would
+ * silently restore the reported bug.
+ */
+function platformExecutableNames(name: string): string[] {
+  if (process.platform !== 'win32') return [name]
+  const declared = (process.env.PATHEXT ?? '').trim()
+  const suffixes = (declared.length > 0 ? declared : WINDOWS_PATHEXT_DEFAULT)
+    .split(';')
+    .map((suffix) => suffix.trim().toLowerCase())
+    .filter((suffix) => WINDOWS_SPAWNABLE_SUFFIXES.includes(suffix))
+  const ordered = suffixes.length > 0 ? suffixes : WINDOWS_SPAWNABLE_SUFFIXES
+  const names = [name]
+  for (const suffix of ordered) names.push(`${name}${suffix}`)
+  return names
+}
+
+/** First candidate that exists as a regular file, or `undefined`. */
+function firstExistingFile(candidates: readonly string[]): string | undefined {
   for (const candidate of candidates) {
     try {
       if (statSync(candidate).isFile()) return candidate
@@ -573,29 +602,36 @@ export function findOpenPencilBinary(): string | undefined {
   return undefined
 }
 
+/** Locate the exact OpenPencil renderer, preferring an explicit override. */
+export function findOpenPencilBinary(): string | undefined {
+  const override = pluginEnv('OPENPENCIL_BINARY')?.trim()
+    || pluginEnv('OPENPENCIL_DESKTOP')?.trim()
+  const candidates = [
+    ...(override === undefined || override.length === 0 ? [] : platformExecutableNames(expandUserHome(override))),
+    '/Applications/OpenPencil.app/Contents/MacOS/openpencil-desktop',
+    join(homedir(), 'Applications', 'OpenPencil.app', 'Contents', 'MacOS', 'openpencil-desktop'),
+  ]
+  const pathEnv = process.env.PATH ?? ''
+  for (const dir of pathEnv.split(delimiter)) {
+    if (dir.length > 0) candidates.push(...platformExecutableNames(join(dir, 'openpencil-desktop')))
+  }
+  return firstExistingFile(candidates)
+}
+
 /** Locate the `jian` binary: env override, known build location, then PATH. */
 export function findJianBinary(): string {
   const override = pluginEnv('OPENPENCIL_JIAN')?.trim()
   if (override !== undefined && override.length > 0) return override
-  const candidates = [join(homedir(), 'workspace', 'jian', 'target', 'release', 'jian')]
-  for (const candidate of candidates) {
-    try {
-      if (statSync(candidate).isFile()) return candidate
-    } catch {
-      // keep looking
-    }
-  }
+  const candidates = platformExecutableNames(join(homedir(), 'workspace', 'jian', 'target', 'release', 'jian'))
   const pathEnv = process.env.PATH ?? ''
-  for (const dir of pathEnv.split(':')) {
+  // `delimiter`, not ':': on Windows the separator is ';' and a hard-coded ':'
+  // splits every drive letter away from its path, so the scan found nothing
+  // even when the binary was on PATH (issue #9).
+  for (const dir of pathEnv.split(delimiter)) {
     if (dir.length === 0) continue
-    const candidate = join(dir, 'jian')
-    try {
-      if (statSync(candidate).isFile()) return candidate
-    } catch {
-      // keep looking
-    }
+    candidates.push(...platformExecutableNames(join(dir, 'jian')))
   }
-  return 'jian'
+  return firstExistingFile(candidates) ?? 'jian'
 }
 
 /** Parse the physical size from `jian render`'s success line. */

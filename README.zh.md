@@ -281,6 +281,14 @@ DSH `0.1.1-rc.2` 不会为嵌套在 PTC/Code Mode 下的工具持久化浏览器
 
 为了限制回放范围，嵌套元数据恢复最多接受 128 个顶层帧；更大的 Code Mode 结果仍可通过其规范 JSON 回退获得。
 
+### 渲染器与 Jian 的查找规则
+
+精确渲染器是 OpenPencil 自己的桌面二进制，本插件不随附，需要单独安装。
+
+- 渲染器按 `openpencil-desktop`（Windows 上还会尝试可执行的扩展名拼法）在 macOS 的 `.app` 路径与每个 `PATH` 条目中查找；可用 `DSHPLUGIN_OPENPENCIL_BINARY`（或 `DSHPLUGIN_OPENPENCIL_DESKTOP`）覆盖，覆盖值始终优先。
+- Jian 依次按 `DSHPLUGIN_OPENPENCIL_JIAN`、`~/workspace/jian/target/release/jian`、`PATH` 查找；裸名 `jian` 仍是最后兜底。
+- Windows 上只探测本插件能直接启动的扩展名（`.com`、`.exe`）：放在 `PATH` 上的 `.cmd`/`.bat` 包装会被忽略，不会遮蔽可执行的 `.exe`。
+
 ## 当前限制
 
 - 对现有画布的后续编辑需要一个已打开的托管编辑器。在用户调用其保存（Save）操作之前，更改保持未保存状态。

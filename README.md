@@ -283,6 +283,14 @@ DSH `0.1.1-rc.2` does not persist browser presentation metadata for tools nested
 
 For bounded replay, nested metadata recovery accepts up to 128 top-level frames; larger Code Mode results remain available through their canonical JSON fallback.
 
+### Renderer and Jian lookup
+
+The exact renderer is OpenPencil's own desktop binary, which this plugin does not ship — it must be installed separately.
+
+- The renderer is looked up as `openpencil-desktop` (and, on Windows, the executable spellings of it) in the macOS `.app` locations, then in every `PATH` entry. Override it with `DSHPLUGIN_OPENPENCIL_BINARY` (or `DSHPLUGIN_OPENPENCIL_DESKTOP`), which always wins.
+- Jian is looked up with `DSHPLUGIN_OPENPENCIL_JIAN`, then at `~/workspace/jian/target/release/jian`, then on `PATH`; the bare name `jian` remains the last resort.
+- Only extensions this plugin can start directly (`.com`, `.exe`) are probed on Windows, so a `.cmd`/`.bat` shim on `PATH` is ignored instead of shadowing a runnable `.exe`.
+
 ## Current Limits
 
 - Follow-up edits to an existing canvas require an already-open managed editor. Changes remain unsaved until the user invokes its Save action.
